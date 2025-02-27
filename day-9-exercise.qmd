@@ -18,7 +18,7 @@ library(tidyverse)
 library(visdat)
 library(broom)
 library(ggthemes)
-
+#In the future, remember not to include install.packages in a qmd file, it breaks the rendering
 
 airquality <- airquality
 vis_dat(airquality)
