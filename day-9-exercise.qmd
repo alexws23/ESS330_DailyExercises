@@ -15,9 +15,7 @@ The Ozone data probably doesn't require cleaning, though it has some missing val
 ```{r}
 #Setup
 library(tidyverse)
-install.packages("visdat")
 library(visdat)
-install.packages("broom")
 library(broom)
 library(ggthemes)
 
