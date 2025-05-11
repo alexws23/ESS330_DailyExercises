@@ -1,0 +1,129 @@
+---
+title: "Day 11 Exercise"
+author: "Alex Smilor"
+format: 
+  html:
+    self-contained: true
+execute:
+  echo: true
+---
+1. Load the airquality dataset in R. What does this dataset represent? Explore its structure using functions like str() and summary().
+```{r}
+library(tidyverse)
+library(tidymodels)
+library(visdat)
+library(broom)
+library(ggthemes)
+library(flextable)
+library(ggpubr)
+air <- airquality
+str(airquality)
+summary(airquality)
+vis_dat(air)
+```
+
+2. Perform a Shapiro-Wilk normality test on the following variables: Ozone, Temp, Solar.R, and Wind.
+```{r}
+shapiro.test(air$Ozone)
+#Ozone is not normally distributed
+shapiro.test(air$Temp)
+#Temperature may be normally distributed
+shapiro.test(air$Solar.R)
+#Solar Radiation is not normally distributed
+shapiro.test(air$Wind)
+#Wind may be normally distributed
+```
+3. What is the purpose of the Shapiro-Wilk test?  
+The purpose of the Shapiro-Wilk test is to test the normality of a dataset or variable. The Shapiro-Wilk test assumes that the data is perfectly normally distributed. Thus, if it returns a low p-value that suggests the data is not normally distributed. It works best for smaller datasets, like the one we are working with currently.
+
+4. What are the null and alternative hypotheses for this test?  
+The null hypothesis for this test is that the data is normally distributed, while the alternative hypothesis is that the data is not normally distributed.
+
+5. Interpret the p-values. Are these variables normally distributed?  
+Ozone and solar radiation have extremely low p-values, suggesting that there is a very low chance that the data is truly normally distributed in reality. Thus, we reject the null and accept the alternative hypothesis. Temperature and wind speed have p-values of 0.957 and 0.1099, which suggest that there is a reasonable likelihood that the data are truly normally distributed. Thus, we reject the alternative hypothesis and conclude that the distributions of temperature and wind speed may be normally distributed. 
+
+6. Create a new column with case_when tranlating the Months into four seasons (Winter (Nov, Dec, Jan), Spring (Feb, Mar, Apr), Summer (May, Jun, Jul), and Fall (Aug, Sep, Oct)).
+```{r}
+air <- air %>% 
+  mutate(Seasons = case_when(Month %in% c(5,6,7) ~ "Summer",
+                             Month %in% c(8,9,10) ~ "Fall",
+                             Month %in% c(11,12,1) ~ "Winter",
+                             Month %in% c(2,3,4) ~ "Spring")
+         )
+print(air)
+```
+
+7. Use table to figure out how many observations we have from each season.
+```{r}
+air %>% 
+  group_by(Seasons) %>% 
+  count() %>% 
+  flextable() %>% 
+  set_header_labels(Seasons = "Seasons", n = "Observations") %>% 
+  theme_vanilla() %>% 
+  add_header_lines("Total Number of Observations per Season")
+```
+
+8. Normalize the predictor variables (Temp, Solar.R, Wind, and Season) using a recipe
+
+```{r}
+  (recipe_obj <- recipe(Ozone ~ Temp + Solar.R + Wind + Seasons, data = air) %>% 
+  step_normalize(all_numeric_predictors()))
+```
+9. What is the purpose of normalizing data?  
+The purpose of normalizing data before using it in predictive models is that it helps enhances interpretability, facilitates the use of certain types of models, and prevents dominant feature from overpowering the model.
+
+10. What function can be used to impute missing values with the mean?  
+The step_impute_mean() function can be used to impute missing values with the mean
+
+11. prep and bake the data to generate a processed dataset.
+```{r}
+prep_recipe <- prep(recipe_obj, training = air) 
+normalized_data <- bake(prep_recipe, new_data = NULL) %>% 
+  mutate(Ozone = air$Ozone)
+```
+
+12. Why is it necessary to both prep() and bake() the recipe?  
+We need to prep the recipe to obtain our normalized daya and then baking the recipe applies all of our transformations to the dataset.
+
+13. Fit a linear model using Ozone as the response variable and all other variables as predictors. Remeber that the . notation can we used to include all variables.
+```{r}
+(model = lm(formula = Ozone ~ . , data = normalized_data) )
+glance(model)
+```
+
+14. Interpret the model summary output (coefficients, R-squared, p-values) in plain language. 
+The summary output of the model suggests that this model accounts for approximately 61% of all variance observed in the data and, given the extremely small p-value, it is unlikely that model doesn't fit the data. As for coefficients, we can see that Temperarture will have the greates positive influence on ozen concentrations, with solar radiation and the season having a smaller positive influence
+
+15. Use broom::augment to supplement the normalized data.frame with the fitted values and residuals.
+```{r}
+augment <- augment(model)
+```
+
+16. Extract the residuals and visualize their distribution as a histogram and qqplot.
+```{r}
+hist <- gghistogram(augment$.resid, y = "density", 
+            bins = 30, fill = "skyblue", 
+            add = "mean",
+            main = "Histogram of Residual Distribution",
+            color = "black", add_density = TRUE) 
+
+qq <- ggqqplot(x = '.resid', augment) 
+```
+
+17. Use ggarange to plot this as one image and interpret what you see in them.  
+The histogram and q-q plot suggest that the data is roughly normally distributed, but has a slight right skew, with many outliers concentrated in the higher values that deviate from normality.
+```{r}
+ggarrange(hist, qq)
+```
+
+18. Create a scatter plot of actual vs. predicted values using ggpubr with the following setting:
+```{r}
+ggscatter(augment, x = "Ozone", y = ".fitted",
+          add = "reg.line", conf.int = TRUE,
+          cor.coef = TRUE, cor.method = "spearman",
+          ellipse = TRUE)
+```
+
+19. How strong of a model do you think this is?   
+Given a relatively high R value and a low p-value, this is probably a decent model, especially when predicting values closer to the mean. However, the slight right skew of the data suggests that this model may be less effective and accurate at predicting high and low ozone concentrations. Overall, while this model is reasonably good, their may be other, nonlinear models that fit the data better.

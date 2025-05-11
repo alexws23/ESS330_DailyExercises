@@ -1,0 +1,90 @@
+---
+title: "Exercise 27"
+author: Alex Smilor
+format:
+   html:
+    toc: true
+    self-contained: true
+execute: 
+  echo: true
+project:
+  output-dir: docs
+---
+```{r}
+#Packages
+library(terra)
+library(tidyverse)
+library(sf)
+library(AOI)
+library(ggpubr)
+library(osmdata)
+```
+
+```{r}
+(bb = AOI::geocode("Fort Collins", bbox = TRUE) |> 
+  st_transform(5070))
+
+url <- 'https://raw.githubusercontent.com/mikejohnson51/csu-ess-330/refs/heads/main/resources/foco-elev-cm.tif'
+
+r <- rast(glue::glue("/vsicurl/https://raw.githubusercontent.com/mikejohnson51/csu-ess-330/refs/heads/main/resources/foco-elev-cm.tif"))
+
+fc = AOI::geocode("Fort Collins", bbox = TRUE) |> 
+  st_transform(crs(r))
+
+osm = osmdata::opq(st_bbox(st_transform(fc,4326))) |> 
+  add_osm_feature("waterway") |> 
+  osmdata_sf()
+
+river = osm$osm_lines |> 
+  st_transform(crs(r)) |> 
+  st_intersection(st_as_sfc(st_bbox(r))) %>% 
+  mutate(length = st_length(.)) |> 
+  slice_max(length, n = 1)
+
+dist <- st_length(river)
+
+poudre_pts <- st_cast(river, to = "POINT")
+
+elev_profile <- terra::extract(elev, poudre_pts)
+
+poudre_elev <- bind_cols(poudre_pts, elev_profile) %>% 
+  mutate(ID = 1:n())
+
+inlet <- head(poudre_elev,1)
+outlet <- tail(poudre_elev, 1)
+
+
+str_dist <- st_distance(inlet, outlet)
+
+dist/str_dist
+
+
+```
+
+The Poudre river in Fort Collins has a sinuosity value of 1.23, meaning that this section of the poudre would be classified as winding. This makes sense given the section of the Poudre the winds through Fort Collins winds slightly but largely flows straight. 
+
+Elevation difference in cm
+```{r}
+head(elev_profile$dem,1) - tail(elev_profile$dem,1)
+```
+
+```{r}
+ggplot(elev_profile, aes(x = ID, y = dem)) +
+  geom_line() +
+  theme_minimal() +
+  labs(
+    x = "Index",
+    y = "Elevation Profile (cm)"
+  )
+```
+
+```{r}
+ggplot() +
+  geom_sf(data = poudre_elev, aes(color = dem)) +
+  theme_void() +
+  scale_color_viridis_c(option = "A") +
+  labs(
+    color = "Elevation (cm)"
+  )
+```
+

@@ -1,0 +1,69 @@
+---
+title: "Exercise 21"
+author: Alex Smilor
+format:
+   html:
+    toc: true
+    self-contained: true
+execute: 
+  echo: true
+project:
+  output-dir: docs
+---
+
+```{r}
+library(dataRetrieval)
+library(tidyverse)
+library(tidymodels)
+library(modeltime)
+library(tsibble)
+library(plotly)
+library(forecast)
+library(feasts)
+
+# Example: Cache la Poudre River at Mouth (USGS site 06752260)
+poudre_flow <- readNWISdv(siteNumber = "06752260",    # Download data from USGS for site 06752260
+                          parameterCd = "00060",      # Parameter code 00060 = discharge in cfs)
+                          startDate = "2013-01-01",   # Set the start date
+                          endDate = "2023-12-31") |>  # Set the end date
+  renameNWISColumns() |>                              # Rename columns to standard names (e.g., "Flow", "Date")
+  mutate(Date = yearmonth(Date)) |>                   # Convert daily Date values into a year-month format (e.g., "2023 Jan")
+  group_by(Date) |>                                   # Group the data by the new monthly Date
+  summarise(Flow = mean(Flow))                       # Calculate the average daily flow for each month
+```
+
+# 1. Convert to tsibble
+```{r}
+poudre_tbl <- as_tsibble(poudre_flow)
+```
+
+# 2. Plotting the time series
+```{r}
+poudre_tsplot <- poudre_tbl %>% 
+  autoplot() +
+  geom_line(color = "steelblue") +
+  labs(title = "Interactive Flow Time Series", x = "Date", y = "Cubic Feet per Second")
+
+ggplotly(poudre_tsplot)
+```
+
+# 3. Subseries
+```{r}
+gg_subseries(poudre_tbl)+
+  labs(title = "Monthly Flow Patterns", y = "Cubic Feet per Second", x = "Year") + 
+  theme_minimal()
+```
+
+This plot shows that the key seasonal difference in flow at this gauge occurs during the late spring and early summer in May and Jun, when flow increases significantly, likely as a result of snowmelt at the beginning of summer. Though there is some variation, the rest of the year's flow is generally fairly low, though it is slightly higher in the late summer than in the winter and fall. Each subseries represents every individual month.
+
+
+```{r}
+poudre_decomp <- poudre_tbl %>% 
+model(STL(Flow ~ season(window = 12))) %>% 
+  components()
+
+autoplot(poudre_decomp) +
+  labs(title = "STL Decomposition of Flow", y = "Cubic Feet per Second") +
+  theme_minimal()
+```
+The plot shows that their is some sort of overall trend in the data and that there is a strong seasonal component of much higher flows in the early summers of most years, though some years only show a relatively small increase in flow during this time. I think that the seasonal components show the general pattern of flow throughout the year, with large peaks in early summer, a smaller peak in the late summer and low flow in the winter. The overall trend shows that flow has been relatively consistent over the last few years, but with a significant decrease compared to the flows from 2014-2016. These years may have been much wetter than the average year. The seasonal component seems to have a slight negative trend, with the summer peaks growing slightly smaller with each year. 

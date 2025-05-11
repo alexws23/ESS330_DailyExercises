@@ -1,0 +1,133 @@
+---
+title: "Exercise 22"
+author: Alex Smilor
+format:
+   html:
+    toc: true
+    self-contained: true
+execute: 
+  echo: true
+project:
+  output-dir: docs
+---
+
+```{r}
+library(dataRetrieval)
+library(tidyverse)
+library(tidymodels)
+library(modeltime)
+library(tsibble)
+library(plotly)
+library(forecast)
+library(feasts)
+library(timetk)
+
+# Example: Cache la Poudre River at Mouth (USGS site 06752260)
+poudre_dailyflow <- readNWISdv(siteNumber = "06752260",    # Download data from USGS for site 06752260
+                          parameterCd = "00060",      # Parameter code 00060 = discharge in cfs)
+                          startDate = "2013-01-01",   # Set the start date
+                          endDate = "2023-12-31") |>  # Set the end date
+  renameNWISColumns()                              # Rename columns to standard names (e.g., "Flow", "Date"
+
+daily_tbl <-  tsibble::as_tsibble(poudre_dailyflow) |> 
+  as_tibble()
+
+splits <- time_series_split(daily_tbl, assess = "12 months", cumulative = TRUE)
+
+training <-  training(splits)
+testing  <-  testing(splits)
+```
+
+```{r}
+mods <- list(
+  arima_reg() |>  set_engine("auto_arima"),
+  
+  prophet_reg() |> set_engine("prophet")
+)
+
+models <- map(mods, ~ fit(.x, Flow ~ Date, data = training))
+(models_tbl <- as_modeltime_table(models))
+(calibration_table <- modeltime_calibrate(models_tbl, testing, quiet = FALSE))
+modeltime_accuracy(calibration_table) |> 
+  arrange(mae)
+(forecast <- calibration_table  |> 
+  modeltime_forecast(h = "12 months", 
+                     new_data = testing,
+                     actual_data = daily_tbl))
+plot_modeltime_forecast(forecast)
+
+refit_tbl <- calibration_table |>
+    modeltime_refit(data = daily_tbl)
+
+refit_tbl |>
+    modeltime_forecast(h = "12 months", actual_data = daily_tbl) |>
+    plot_modeltime_forecast()
+
+refit_forecast <- refit_tbl |>
+    modeltime_forecast(h = "12 months", actual_data = daily_tbl)
+```
+
+```{r}
+poudre_2024 <- readNWISdv(siteNumber = "06752260",    # Download data from USGS for site 06752260
+                          parameterCd = "00060",      # Parameter code 00060 = discharge in cfs)
+                          startDate = "2024-01-01",   # Set the start date
+                          endDate = "2024-12-31") |>  # Set the end date
+  renameNWISColumns() |>                              # Rename columns to standard names (e.g., "Flow", "Date")
+  mutate(Date = yearmonth(Date)) |>                   # Convert daily Date values into a year-month format (e.g., "2023 Jan")
+  group_by(Date) |>                                   # Group the data by the new monthly Date
+  summarise(Flow = mean(Flow))                       # Calculate the average daily flow for each month
+
+forecast2 <- rename(refit_forecast, Date = .index)
+forecast2 <- rename(forecast2, Flow = .value)
+forecast_plot <- forecast2 %>% 
+  filter(.model_desc == c("PROPHET", "ACTUAL")) %>% 
+  mutate(Date = yearmonth(Date)) %>% 
+  group_by(Date) %>% 
+  summarise(Flow = mean(Flow))
+
+
+ggplot() +
+  geom_line(data = forecast_plot, aes(x=Date, y = Flow, color = "Predicted")) +
+  geom_line(data = poudre_2024, aes(x=Date, y = Flow, color = "Actual")) + 
+  theme_minimal() + 
+  labs(
+    x = "Month",
+    y = "Flow (Cubic Feet per Second)",
+    color = ""
+  )
+
+```
+
+The prediction of the prophet model is fairly accurate during times of relatively low flow, but severely overestimates peak flow in June. 2024 had exceptionally low average flow during the month of June compared to the rest of the years included in this model, which may explain why the model overestimated so much.
+
+```{r}
+poudre_merge <- poudre_2024 %>% 
+  rename(Actual = Flow) %>% 
+  mutate(Date2 = as.character(Date))
+
+forecast_merge <- forecast2 %>% 
+  filter(.model_desc == "PROPHET") %>% 
+  mutate(Date = yearmonth(Date)) %>% 
+  group_by(Date) %>% 
+  summarise(Flow = mean(Flow)) %>% 
+  rename(Predicted = Flow) %>% 
+  mutate(Date2 = as.character(Date))
+
+poudre_join <- inner_join(forecast_merge, poudre_merge, by = "Date2") %>% 
+  select(c(Date2, Predicted, Actual)) %>% 
+  rename(Date = Date2)
+
+poudre_lm<- lm(Predicted ~ Actual, data = poudre_join)
+summary(poudre_lm)
+```
+The R-squared value between the model predictions and the observed values is 0.8223, meaning that this model accounts for approximately 82% of the observed variance.
+
+```{r}
+poudre_join %>% 
+  ggplot(aes(x = Actual, y = Predicted)) + 
+  geom_point()+
+  geom_abline(linetype = 1, color = "black") +
+  geom_smooth(color = "red", method = "lm", formula = (y ~ x)) +
+  theme_linedraw()
+```
+
