@@ -45,7 +45,7 @@ dist <- st_length(river)
 
 poudre_pts <- st_cast(river, to = "POINT")
 
-elev_profile <- terra::extract(elev, poudre_pts)
+elev_profile <- terra::extract(r, poudre_pts)
 
 poudre_elev <- bind_cols(poudre_pts, elev_profile) %>% 
   mutate(ID = 1:n())
